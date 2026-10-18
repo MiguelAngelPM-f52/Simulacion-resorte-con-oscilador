@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 
 def pedir_parametros():
     """Permite al usuario introducir los parámetros del sistema de forma interactiva."""
@@ -40,76 +41,87 @@ def edom_sistema(t, y, p):
     accel = np.linalg.solve(M, F)
     return [dx_val, accel[0], dth_val, accel[1]]
 
+def generar_coordenadas_resorte(x_bloque, num_vueltas=10, ancho=0.08):
+    """Genera los puntos (x, y) para dibujar un resorte en zigzag desde x=0 hasta x_bloque."""
+    x = np.linspace(0, x_bloque, 100)
+    y = np.zeros(100)
+    # Zigzag central
+    y[10:-10] = ancho * np.sin(np.linspace(0, num_vueltas * 2 * np.pi, 80))
+    return x, y
+
 def main():
-    # 1. Obtener parámetros interactivos
+    # 1. Parámetros
     params = pedir_parametros()
 
-    # 2. Condiciones iniciales y tiempo de simulación
+    # 2. Condiciones iniciales
     y0 = [1.2, 0.0, np.deg2rad(45), 0.0]  # [x, dx/dt, theta, dtheta/dt]
     tspan = (0, 10)
-    t_eval = np.linspace(tspan[0], tspan[1], 1000)
+    t_eval = np.linspace(tspan[0], tspan[1], 500)
 
-    print("\nEjecutando integración numérica con SciPy...")
+    print("\nEjecutando integración numérica...")
     sol = solve_ivp(lambda t, y: edom_sistema(t, y, params), tspan, y0, 
                     t_eval=t_eval, rtol=1e-8, atol=1e-8)
 
     t = sol.t
     x = sol.y[0]
-    dx = sol.y[1]
     theta = sol.y[2]
-    dtheta = sol.y[3]
 
-    # 3. Post-procesamiento (Energía y Fuerza Normal)
-    n_pts = len(t)
-    E = np.zeros(n_pts)
-    N = np.zeros(n_pts)
+    # Posiciones cartesianas de las masas
+    x1 = x
+    y1 = np.zeros_like(x1)
 
-    for i in range(n_pts):
-        _, d2x, _, d2th = edom_sistema(t[i], sol.y[:, i], params)
-        
-        # Energía Mecánica Total (T + V)
-        T = 0.5 * (params['m1'] + params['m2']) * dx[i]**2 + \
-            0.5 * params['m2'] * params['l']**2 * dtheta[i]**2 + \
-            params['m2'] * params['l'] * dx[i] * dtheta[i] * np.cos(theta[i])
-            
-        V = 0.5 * params['k'] * (x[i] - params['l0'])**2 - \
-            params['m2'] * params['g'] * params['l'] * np.cos(theta[i])
-            
-        E[i] = T + V
-        
-        # Fuerza Normal del suelo sobre m1
-        N[i] = (params['m1'] + params['m2']) * params['g'] + \
-               params['m2'] * params['l'] * (d2th * np.sin(theta[i]) + dtheta[i]**2 * np.cos(theta[i]))
+    x2 = x1 + params['l'] * np.sin(theta)
+    y2 = -params['l'] * np.cos(theta)
 
-    print("¡Simulación finalizada con éxito! Generando gráficos...\n")
+    # 3. Animación gráfica del sistema físico
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.set_aspect('equal')
+    ax.grid(True)
+    ax.set_xlim(-0.5, np.max(x1) + params['l'] + 0.5)
+    ax.set_ylim(-params['l'] - 0.5, 0.5)
+    ax.set_title('Animación: Sistema Resorte - Péndulo Acoplado')
+    ax.set_xlabel('X (m)')
+    ax.set_ylabel('Y (m)')
 
-    # 4. Representación Gráfica
-    plt.figure(figsize=(10, 9))
+    # Elementos visuales
+    linea_suelo = ax.axhline(0, color='brown', lw=2)
+    linea_pared = ax.axvline(0, color='gray', lw=4)
+    linea_resorte, = ax.plot([], [], 'k-', lw=1.5, label='Resorte')
+    bloque_m1, = ax.plot([], [], 'bs', ms=20, label='Masa m1')
+    linea_varilla, = ax.plot([], [], 'r-', lw=2, label='Varilla péndulo')
+    masa_m2, = ax.plot([], [], 'ro', ms=12, label='Masa m2')
+    traza_pulo, = ax.plot([], [], 'g--', lw=1, alpha=0.5, label='Trayectoria m2')
 
-    plt.subplot(3, 1, 1)
-    plt.plot(t, x, 'b-', label='x (m)', linewidth=1.5)
-    plt.plot(t, np.rad2deg(theta), 'r--', label='theta (deg)', linewidth=1.5)
-    plt.title('Evolución temporal de las coordenadas generalizadas')
-    plt.xlabel('Tiempo (s)')
-    plt.ylabel('Magnitud')
-    plt.legend()
-    plt.grid(True)
+    ax.legend(loc='upper right')
 
-    plt.subplot(3, 1, 2)
-    plt.plot(t, E, 'k-', linewidth=1.5)
-    plt.title('Energía Mecánica Total (Constante del movimiento)')
-    plt.xlabel('Tiempo (s)')
-    plt.ylabel('Energía (J)')
-    plt.grid(True)
+    def init():
+        linea_resorte.set_data([], [])
+        bloque_m1.set_data([], [])
+        linea_varilla.set_data([], [])
+        masa_m2.set_data([], [])
+        traza_pulo.set_data([], [])
+        return linea_resorte, bloque_m1, linea_varilla, masa_m2, traza_pulo
 
-    plt.subplot(3, 1, 3)
-    plt.plot(t, N, 'm-', linewidth=1.5)
-    plt.title('Fuerza Normal del suelo sobre m1')
-    plt.xlabel('Tiempo (s)')
-    plt.ylabel('Normal N (N)')
-    plt.grid(True)
+    def update(frame):
+        # Dibujar resorte
+        xr, yr = generar_coordenadas_resorte(x1[frame])
+        linea_resorte.set_data(xr, yr)
 
-    plt.tight_layout()
+        # Dibujar m1
+        bloque_m1.set_data([x1[frame]], [y1[frame]])
+
+        # Dibujar péndulo (varilla y masa m2)
+        linea_varilla.set_data([x1[frame], x2[frame]], [y1[frame], y2[frame]])
+        masa_m2.set_data([x2[frame]], [y2[frame]])
+
+        # Trayectoria histórica de m2
+        traza_pulo.set_data(x2[:frame], y2[:frame])
+
+        return linea_resorte, bloque_m1, linea_varilla, masa_m2, traza_pulo
+
+    ani = animation.FuncAnimation(fig, update, frames=len(t), init_func=init,
+                                  interval=20, blit=True)
+
     plt.show()
 
 if __name__ == '__main__':
