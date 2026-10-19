@@ -8,13 +8,15 @@ def pedir_parametros():
     """Permite introducir los parámetros del sistema de forma interactiva.
     Si no hay entrada disponible (por ejemplo código ejecutado en entorno no interactivo)
     o hay error en la conversión, se usan valores por defecto.
+
+    Ahora también permite introducir el coeficiente de rozamiento viscoso 'b'.
     """
     print("==================================================")
     print("  SIMULACIÓN: PÉNDULO ARTICULADO SOBRE BASE MÓVIL ")
     print("==================================================")
     print("Introduce los valores o pulsa [Enter] para usar los predeterminados:\n")
 
-    defaults = {'m1': 2.0, 'm2': 1.0, 'k': 20.0, 'l0': 1.0, 'l': 0.8, 'g': 9.81}
+    defaults = {'m1': 2.0, 'm2': 1.0, 'k': 20.0, 'l0': 1.0, 'l': 0.8, 'g': 9.81, 'b': 0.2}
     try:
         # Proteger contra EOFError cuando no hay stdin disponible
         m1 = float(input("Masa de la base m1 (kg): ") or defaults['m1'])
@@ -23,11 +25,12 @@ def pedir_parametros():
         l0 = float(input("Longitud natural del resorte l0 (m): ") or defaults['l0'])
         l  = float(input("Longitud del péndulo l (m): ") or defaults['l'])
         g  = float(input("Aceleración de la gravedad g (m/s^2): ") or defaults['g'])
+        b  = float(input("Coeficiente de rozamiento viscoso b (N·s/m o N·m·s/rad): ") or defaults['b'])
     except (ValueError, EOFError):
         print("\n[Aviso] Entrada no válida o no interactiva. Se usarán los valores por defecto.")
-        m1, m2, k, l0, l, g = defaults['m1'], defaults['m2'], defaults['k'], defaults['l0'], defaults['l'], defaults['g']
+        m1, m2, k, l0, l, g, b = defaults['m1'], defaults['m2'], defaults['k'], defaults['l0'], defaults['l'], defaults['g'], defaults['b']
 
-    return {'m1': m1, 'm2': m2, 'k': k, 'l0': l0, 'l': l, 'g': g}
+    return {'m1': m1, 'm2': m2, 'k': k, 'l0': l0, 'l': l, 'g': g, 'b': b}
 
 
 def edom_sistema(t, y, p):
@@ -35,6 +38,10 @@ def edom_sistema(t, y, p):
 
     y = [x, dx, theta, dtheta]
     Devuelve [dx, ddx, dtheta, ddtheta].
+
+    Se añade un término de rozamiento viscoso proporcional a la velocidad:
+    - Para la masa de la base: fuerza de rozamiento -b * dx
+    - Para el péndulo: par de rozamiento -b * dtheta (modelo simplificado)
     """
     x_val, dx_val, th_val, dth_val = y
 
@@ -44,10 +51,14 @@ def edom_sistema(t, y, p):
         [p['m2'] * p['l'] * np.cos(th_val), p['m2'] * p['l']**2]
     ])
 
-    # Fuerzas / términos del lado derecho
+    # Fuerzas / términos del lado derecho (incluye rozamiento)
+    # Término de resorte sobre la base: -k*(x-l0)
+    # Término centrífugo: m2*l*dth^2*sin(th)
+    # Término de gravedad sobre el péndulo: -m2*g*l*sin(th)
+    # Términos de rozamiento: -b*dx (translacional) y -b*dtheta (rotacional, simplificado)
     F = np.array([
-        p['m2'] * p['l'] * (dth_val**2) * np.sin(th_val) - p['k'] * (x_val - p['l0']),
-        -p['m2'] * p['g'] * p['l'] * np.sin(th_val)
+        p['m2'] * p['l'] * (dth_val**2) * np.sin(th_val) - p['k'] * (x_val - p['l0']) - p['b'] * dx_val,
+        -p['m2'] * p['g'] * p['l'] * np.sin(th_val) - p['b'] * dth_val
     ])
 
     # Resolver aceleraciones
@@ -179,8 +190,8 @@ def main():
     line_U, = ax_energy.plot([], [], color='C4', lw=1.0, linestyle='-.', label='U (potencial)')
     ax_energy.legend(fontsize=8)
     ax_energy.set_xlim(t[0], t[-1])
-    Emin = np.min(E_total);
-    Emax = np.max(E_total);
+    Emin = np.min(E_total)
+    Emax = np.max(E_total)
     E_margin = (Emax - Emin) * 0.1 if (Emax - Emin) > 0 else 1.0
     ax_energy.set_ylim(Emin - E_margin, Emax + E_margin)
 
