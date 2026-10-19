@@ -25,7 +25,7 @@ def pedir_parametros():
         l0 = float(input("Longitud natural del resorte l0 (m): ") or defaults['l0'])
         l  = float(input("Longitud del péndulo l (m): ") or defaults['l'])
         g  = float(input("Aceleración de la gravedad g (m/s^2): ") or defaults['g'])
-        b  = float(input("Coeficiente de rozamiento viscoso b (N·s/m o N·m·s/rad): ") or defaults['b'])
+        b  = float(input("Coeficiente de rozamiento (N·s/m o N·m·s/rad): ") or defaults['b'])
     except (ValueError, EOFError):
         print("\n[Aviso] Entrada no válida o no interactiva. Se usarán los valores por defecto.")
         m1, m2, k, l0, l, g, b = defaults['m1'], defaults['m2'], defaults['k'], defaults['l0'], defaults['l'], defaults['g'], defaults['b']
