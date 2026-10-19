@@ -1,22 +1,28 @@
+import argparse
+import sys
+import os
 import numpy as np
 from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib import gridspec
 
-def pedir_parametros():
+
+def pedir_parametros(defaults=None):
     """Permite introducir los parámetros del sistema de forma interactiva.
     Si no hay entrada disponible (por ejemplo código ejecutado en entorno no interactivo)
     o hay error en la conversión, se usan valores por defecto.
 
     Ahora también permite introducir el coeficiente de rozamiento viscoso 'b'.
     """
+    if defaults is None:
+        defaults = {'m1': 2.0, 'm2': 1.0, 'k': 20.0, 'l0': 1.0, 'l': 0.8, 'g': 9.81, 'b': 0.2}
+
     print("==================================================")
     print("  SIMULACIÓN: PÉNDULO ARTICULADO SOBRE BASE MÓVIL ")
     print("==================================================")
     print("Introduce los valores o pulsa [Enter] para usar los predeterminados:\n")
 
-    defaults = {'m1': 2.0, 'm2': 1.0, 'k': 20.0, 'l0': 1.0, 'l': 0.8, 'g': 9.81, 'b': 0.2}
     try:
         # Proteger contra EOFError cuando no hay stdin disponible
         m1 = float(input("Masa de la base m1 (kg): ") or defaults['m1'])
@@ -52,10 +58,6 @@ def edom_sistema(t, y, p):
     ])
 
     # Fuerzas / términos del lado derecho (incluye rozamiento)
-    # Término de resorte sobre la base: -k*(x-l0)
-    # Término centrífugo: m2*l*dth^2*sin(th)
-    # Término de gravedad sobre el péndulo: -m2*g*l*sin(th)
-    # Términos de rozamiento: -b*dx (translacional) y -b*dtheta (rotacional, simplificado)
     F = np.array([
         p['m2'] * p['l'] * (dth_val**2) * np.sin(th_val) - p['k'] * (x_val - p['l0']) - p['b'] * dx_val,
         -p['m2'] * p['g'] * p['l'] * np.sin(th_val) - p['b'] * dth_val
@@ -89,27 +91,26 @@ def generar_coordenadas_resorte(x_bloque, num_vueltas=10, ancho=0.08, n_puntos=1
         inner = slice(10, -10)
         phases = np.linspace(0, num_vueltas * 2 * np.pi, xr[inner].size)
         # amplitud escalada por la longitud para que resulte proporcional
-        amp = ancho * max(0.5, abs(xr[-1] - xr[0])) 
+        amp = ancho * max(0.5, abs(xr[-1] - xr[0]))
         yr[inner] = amp * np.sin(phases)
     return xr, yr
 
 
-def main():
-    # 1. Obtener parámetros
-    params = pedir_parametros()
+def run_simulation(params, y0=None, tspan=(0, 10), n_steps=400, save_animation=None):
+    """Ejecuta la simulación y muestra (o guarda) la animación.
 
-    # 2. Condiciones iniciales y resolución numérica
-    y0 = [1.2, 0.0, np.deg2rad(45), 0.0]  # [x, dx/dt, theta, dtheta/dt]
-    tspan = (0, 10)
-    t_eval = np.linspace(tspan[0], tspan[1], 400)
+    params: diccionario con m1,m2,k,l0,l,g,b
+    save_animation: ruta de archivo para guardar la animación (mp4). Si None, muestra en pantalla.
+    """
+    if y0 is None:
+        y0 = [1.2, 0.0, np.deg2rad(45), 0.0]
+    t_eval = np.linspace(tspan[0], tspan[1], n_steps)
 
-    print("\nCalculando trayectoria con SciPy (solve_ivp)...")
     sol = solve_ivp(lambda t, y: edom_sistema(t, y, params), tspan, y0,
                     t_eval=t_eval, rtol=1e-8, atol=1e-8)
 
     if not sol.success:
-        print("[Error] La integración numérica falló:", sol.message)
-        return
+        raise RuntimeError(f"La integración numérica falló: {sol.message}")
 
     t = sol.t
     x = sol.y[0]
@@ -123,8 +124,7 @@ def main():
     x2 = x1 + params['l'] * np.sin(theta)
     y2 = -params['l'] * np.cos(theta)
 
-    # Calcular energías (para gráficos auxiliares)
-    # Velocidad del péndulo m2
+    # Energías
     v2x = dx + params['l'] * np.cos(theta) * dtheta
     v2y = params['l'] * np.sin(theta) * dtheta
     v2sq = v2x**2 + v2y**2
@@ -240,11 +240,85 @@ def main():
         return (linea_resorte, bloque_m1, linea_varilla, masa_m2, traza,
                 line_theta, point_theta, line_E, line_T, line_U)
 
-    print("¡Listo! Abriendo ventana de animación y gráficos auxiliares...\n")
     ani = animation.FuncAnimation(fig, update, frames=len(t), init_func=init,
-                                  interval=25, blit=True)
-    plt.tight_layout()
-    plt.show()
+                                  interval=25, blit=False)
+
+    if save_animation:
+        print(f"Guardando animación en {save_animation} ...")
+        ani.save(save_animation, writer='ffmpeg', fps=30)
+        print("Guardado completado.")
+    else:
+        print("¡Listo! Abriendo ventana de animación y gráficos auxiliares...\n")
+        plt.tight_layout()
+        plt.show()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Simulación péndulo articulado sobre base móvil")
+    parser.add_argument('--m1', type=float, help='Masa de la base m1 (kg)')
+    parser.add_argument('--m2', type=float, help='Masa del péndulo m2 (kg)')
+    parser.add_argument('--k', type=float, help='Constante del resorte k (N/m)')
+    parser.add_argument('--l0', type=float, help='Longitud natural del resorte l0 (m)')
+    parser.add_argument('--l', type=float, help='Longitud del péndulo l (m)')
+    parser.add_argument('--g', type=float, help='Aceleración de la gravedad g (m/s^2)')
+    parser.add_argument('--b', type=float, help='Coeficiente de rozamiento viscoso b')
+    parser.add_argument('--no-input', action='store_true', help='No preguntar interactivamente; usar defaults si no se pasan args')
+    parser.add_argument('--save', type=str, help='Si se indica, guardar animación en archivo (mp4) en vez de mostrarla')
+    args = parser.parse_args()
+
+    defaults = {'m1': 2.0, 'm2': 1.0, 'k': 20.0, 'l0': 1.0, 'l': 0.8, 'g': 9.81, 'b': 0.2}
+
+    # ¿Hay stdin interactivo?
+    stdin_is_tty = sys.stdin.isatty()
+
+    # Decidir parámetros:
+    provided_args = any(v is not None for v in [args.m1, args.m2, args.k, args.l0, args.l, args.g, args.b])
+    if provided_args and args.no_input:
+        params = {
+            'm1': args.m1 if args.m1 is not None else defaults['m1'],
+            'm2': args.m2 if args.m2 is not None else defaults['m2'],
+            'k' : args.k  if args.k  is not None else defaults['k'],
+            'l0': args.l0 if args.l0 is not None else defaults['l0'],
+            'l' : args.l  if args.l  is not None else defaults['l'],
+            'g' : args.g  if args.g  is not None else defaults['g'],
+            'b' : args.b  if args.b  is not None else defaults['b'],
+        }
+    elif provided_args and not args.no_input:
+        # Si se pasan args, úsalos (combinados con defaults)
+        params = {
+            'm1': args.m1 if args.m1 is not None else defaults['m1'],
+            'm2': args.m2 if args.m2 is not None else defaults['m2'],
+            'k' : args.k  if args.k  is not None else defaults['k'],
+            'l0': args.l0 if args.l0 is not None else defaults['l0'],
+            'l' : args.l  if args.l  is not None else defaults['l'],
+            'g' : args.g  if args.g  is not None else defaults['g'],
+            'b' : args.b  if args.b  is not None else defaults['b'],
+        }
+    else:
+        # No se pasaron args (o los que se pasaron están incompletos)
+        # si no hay stdin interactivo y se solicitó no-input, usar defaults
+        if not stdin_is_tty or args.no_input:
+            params = defaults.copy()
+            print("[Info] Entorno no interactivo o --no-input: usando valores por defecto:", params)
+        else:
+            # stdin es interactivo: pedir parámetros al usuario
+            params = pedir_parametros(defaults)
+
+    # Detectar entorno sin display gráfico (Linux): usar guardado automático si no se indicó --save
+    headless = False
+    if sys.platform != 'win32':
+        # En Linux/mac, si DISPLAY no está definida, probablemente no hay servidor X disponible
+        if os.environ.get('DISPLAY', '') == '':
+            headless = True
+
+    save_target = args.save
+    if headless and save_target is None:
+        # autoguardar en entorno headless
+        save_target = 'simulacion_auto.mp4'
+        print(f"[Info] Entorno sin display detectado; la animación se guardará en {save_target}")
+
+    # Ejecutar simulación y mostrar/guardar
+    run_simulation(params, save_animation=save_target)
 
 
 if __name__ == '__main__':
